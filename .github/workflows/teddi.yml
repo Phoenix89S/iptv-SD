@@ -1,0 +1,236 @@
+name: Teddi IPTV Parser
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 3 * * *"
+
+  push:
+    paths:
+      - ".github/workflows/teddi.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: teddi-iptv
+  cancel-in-progress: false
+
+jobs:
+  teddi:
+    name: Run Teddi IPTV Parser
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      # ------------------------------------------------------------
+      # CHECKOUT
+      # ------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # ------------------------------------------------------------
+      # PYTHON
+      # ------------------------------------------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      # ------------------------------------------------------------
+      # DOWNLOAD CURRENT Teddi_Iptv.py
+      # ------------------------------------------------------------
+      - name: Download Teddi_Iptv.py
+        run: |
+          set -e
+
+          curl -fL \
+            "https://raw.githubusercontent.com/Phoenix89S/iptv-SD/master/Teddi_Iptv.py" \
+            -o Teddi_Iptv.py
+
+          test -s Teddi_Iptv.py
+
+          echo "Downloaded Teddi_Iptv.py:"
+          ls -lh Teddi_Iptv.py
+
+      # ------------------------------------------------------------
+      # PYTHON CHECK
+      # ------------------------------------------------------------
+      - name: Check Python
+        run: |
+          python --version
+          python -m pip --version
+
+      # ------------------------------------------------------------
+      # SYNTAX CHECK
+      # ------------------------------------------------------------
+      - name: Check Teddi syntax
+        run: |
+          python -m py_compile Teddi_Iptv.py
+
+      # ------------------------------------------------------------
+      # SHOW HELP
+      # ------------------------------------------------------------
+      - name: Show Teddi help
+        run: |
+          python Teddi_Iptv.py --help
+
+      # ------------------------------------------------------------
+      # RUN
+      # ------------------------------------------------------------
+      - name: Run Teddi IPTV Parser
+        run: |
+          python Teddi_Iptv.py
+
+      # ------------------------------------------------------------
+      # SHOW GENERATED FILES
+      # ------------------------------------------------------------
+      - name: Show generated files
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "TEDDI IPTV OUTPUT"
+          echo "============================================================"
+
+          if [ -d "mega_iptv_output" ]; then
+            find mega_iptv_output -maxdepth 2 -type f \
+              -printf '%p (%s bytes)\n' | sort
+          else
+            echo "mega_iptv_output directory not found"
+          fi
+
+      # ------------------------------------------------------------
+      # SHOW PLAYLIST STATISTICS
+      # ------------------------------------------------------------
+      - name: Show playlist statistics
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "PLAYLIST STATISTICS"
+          echo "============================================================"
+
+          for file in \
+            mega_iptv_output/mega_best.m3u \
+            mega_iptv_output/mega_all_streams.m3u \
+            mega_iptv_output/mega_12plus.m3u \
+            mega_iptv_output/mega_russia.m3u \
+            mega_iptv_output/mega_russia_12plus.m3u \
+            mega_iptv_output/Stable_Ru_IPTV.m3u
+          do
+            if [ -f "$file" ]; then
+              echo
+              echo "FILE: $file"
+              ls -lh "$file"
+              echo "EXTINF:"
+              grep -c '^#EXTINF:' "$file" || true
+              echo "URL:"
+              grep -Evc '^(#|$)' "$file" || true
+            else
+              echo
+              echo "NOT FOUND: $file"
+            fi
+          done
+
+      # ------------------------------------------------------------
+      # SHOW JSON STATISTICS
+      # ------------------------------------------------------------
+      - name: Show statistics.json
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "statistics.json"
+          echo "============================================================"
+
+          if [ -f "mega_iptv_output/statistics.json" ]; then
+            cat mega_iptv_output/statistics.json
+          else
+            echo "statistics.json not found"
+          fi
+
+      # ------------------------------------------------------------
+      # SHOW HUMAN READABLE STATISTICS
+      # ------------------------------------------------------------
+      - name: Show statistics.txt
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "statistics.txt"
+          echo "============================================================"
+
+          if [ -f "mega_iptv_output/statistics.txt" ]; then
+            cat mega_iptv_output/statistics.txt
+          else
+            echo "statistics.txt not found"
+          fi
+
+      # ------------------------------------------------------------
+      # SHOW STABLE STATE
+      # ------------------------------------------------------------
+      - name: Show Stable state
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "STABLE STATE"
+          echo "============================================================"
+
+          if [ -f "mega_iptv_output/stable_state.json" ]; then
+            cat mega_iptv_output/stable_state.json
+          else
+            echo "stable_state.json not found"
+          fi
+
+      # ------------------------------------------------------------
+      # SHOW STABLE PLAYLIST
+      # ------------------------------------------------------------
+      - name: Show Stable playlist
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "STABLE PLAYLIST"
+          echo "============================================================"
+
+          if [ -f "mega_iptv_output/Stable_Ru_IPTV.m3u" ]; then
+            echo "File:"
+            ls -lh mega_iptv_output/Stable_Ru_IPTV.m3u
+
+            echo
+            echo "Entries:"
+            grep -c '^#EXTINF:' \
+              mega_iptv_output/Stable_Ru_IPTV.m3u || true
+          else
+            echo "Stable_Ru_IPTV.m3u not found"
+          fi
+
+      # ------------------------------------------------------------
+      # UPLOAD ARTIFACT
+      # ------------------------------------------------------------
+      - name: Upload Teddi results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teddi-iptv-results-${{ github.run_number }}
+          path: |
+            mega_iptv_output/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ------------------------------------------------------------
+      # COMMIT ONLY GENERATED OUTPUT
+      # ------------------------------------------------------------
+      - name: Commit generated results
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add mega_iptv_output/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Teddi IPTV: update results"
+            git push
+          fi
