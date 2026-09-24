@@ -29,7 +29,7 @@ jobs:
       # ============================================================
       # CHECKOUT
       # ============================================================
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -41,19 +41,24 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-          cache: "pip"
 
       # ============================================================
-      # SYSTEM DEPENDENCIES
+      # SYSTEM TOOLS
       # ============================================================
-      - name: Install FFmpeg
+      - name: Install system dependencies
         run: |
-          set -eux
+          set -euo pipefail
 
           sudo apt-get update
           sudo apt-get install -y ffmpeg curl
 
+          echo "Python:"
+          python --version
+
+          echo "FFmpeg:"
           ffmpeg -version | head -n 1
+
+          echo "FFprobe:"
           ffprobe -version | head -n 1
 
       # ============================================================
@@ -61,20 +66,22 @@ jobs:
       # ============================================================
       - name: Install Python dependencies
         run: |
-          set -eux
+          set -euo pipefail
 
           python -m pip install --upgrade pip
-          python -m pip install --upgrade aiohttp rich
+          python -m pip install --no-cache-dir aiohttp rich
+
+          python -c "import aiohttp; print('aiohttp OK:', aiohttp.__version__)"
+          python -c "import rich; print('rich OK')"
 
       # ============================================================
       # DOWNLOAD TEDDI
       # ============================================================
       - name: Download Teddi_Iptv.py
         run: |
-          set -eux
+          set -euo pipefail
 
-          curl --fail \
-            --location \
+          curl -fL \
             --retry 5 \
             --retry-delay 5 \
             --connect-timeout 20 \
@@ -84,57 +91,60 @@ jobs:
 
           test -s Teddi_Iptv.py
 
-          echo "Downloaded Teddi_Iptv.py:"
-          wc -l Teddi_Iptv.py
+          echo "Teddi_Iptv.py:"
           ls -lh Teddi_Iptv.py
-
-      # ============================================================
-      # PYTHON CHECK
-      # ============================================================
-      - name: Check Python
-        run: |
-          set -eux
-
-          python --version
-          python -m pip --version
-
-          python -c "import aiohttp; print('aiohttp:', aiohttp.__version__)"
-          python -c "import rich; print('rich imported successfully')"
+          wc -l Teddi_Iptv.py
 
       # ============================================================
       # SYNTAX CHECK
       # ============================================================
       - name: Check Teddi syntax
         run: |
-          set -eux
+          set -euo pipefail
 
           python -m py_compile Teddi_Iptv.py
 
-          echo "Teddi_Iptv.py syntax OK"
+          echo "Teddi syntax: OK"
 
       # ============================================================
-      # OPTIONAL HELP CHECK
+      # IMPORT CHECK
       # ============================================================
-      - name: Check Teddi help
+      - name: Check Teddi imports
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import aiohttp
+          import rich
+
+          print("aiohttp: OK")
+          print("rich: OK")
+          print("Teddi dependencies: OK")
+          PY
+
+      # ============================================================
+      # HELP
+      # ============================================================
+      - name: Show Teddi help
         run: |
           set +e
 
           python Teddi_Iptv.py --help
 
-          CODE=$?
+          EXIT_CODE=$?
 
-          echo "Help exit code: $CODE"
+          echo "Teddi --help exit code: ${EXIT_CODE}"
 
-          # Некоторые версии Teddi могут не иметь --help.
-          # Поэтому этот шаг никогда не ломает workflow.
+          # --help не является обязательной частью работы парсера.
+          # Поэтому его ошибка не останавливает основной запуск.
           exit 0
 
       # ============================================================
       # PREPARE OUTPUT
       # ============================================================
-      - name: Prepare output directory
+      - name: Prepare output
         run: |
-          set -eux
+          set -euo pipefail
 
           mkdir -p mega_iptv_output
 
@@ -153,40 +163,46 @@ jobs:
       # ============================================================
       - name: Run Teddi IPTV Parser
         run: |
-          set -eux
+          set -euo pipefail
 
-          echo "Starting Teddi IPTV Parser..."
+          echo "=============================================="
+          echo "START TEDDI IPTV PARSER"
+          echo "=============================================="
 
           python -u Teddi_Iptv.py
 
-          echo "Teddi IPTV Parser finished."
+          echo "=============================================="
+          echo "TEDDI FINISHED"
+          echo "=============================================="
 
       # ============================================================
-      # SHOW GENERATED FILES
+      # SHOW OUTPUT
       # ============================================================
       - name: Show generated files
         if: always()
         run: |
-          echo "============================================================"
-          echo "TEDDI IPTV OUTPUT"
-          echo "============================================================"
+          echo "=============================================="
+          echo "TEDDI OUTPUT"
+          echo "=============================================="
 
-          if [ -d "mega_iptv_output" ]; then
-            find mega_iptv_output -maxdepth 2 -type f \
-              -printf '%p (%s bytes)\n' | sort
+          if [ -d mega_iptv_output ]; then
+            find mega_iptv_output \
+              -type f \
+              -printf '%p (%s bytes)\n' \
+              | sort
           else
-            echo "mega_iptv_output directory not found"
+            echo "mega_iptv_output not found"
           fi
 
       # ============================================================
       # PLAYLIST STATISTICS
       # ============================================================
-      - name: Show playlist statistics
+      - name: Playlist statistics
         if: always()
         run: |
-          echo "============================================================"
+          echo "=============================================="
           echo "PLAYLIST STATISTICS"
-          echo "============================================================"
+          echo "=============================================="
 
           for file in \
             mega_iptv_output/mega_best.m3u \
@@ -213,98 +229,72 @@ jobs:
           done
 
       # ============================================================
-      # SHOW JSON STATISTICS
+      # JSON
       # ============================================================
       - name: Show statistics.json
         if: always()
         run: |
-          echo "============================================================"
+          echo "=============================================="
           echo "statistics.json"
-          echo "============================================================"
+          echo "=============================================="
 
-          if [ -f "mega_iptv_output/statistics.json" ]; then
+          if [ -f mega_iptv_output/statistics.json ]; then
             cat mega_iptv_output/statistics.json
           else
             echo "statistics.json not found"
           fi
 
       # ============================================================
-      # SHOW TXT STATISTICS
+      # TXT
       # ============================================================
       - name: Show statistics.txt
         if: always()
         run: |
-          echo "============================================================"
+          echo "=============================================="
           echo "statistics.txt"
-          echo "============================================================"
+          echo "=============================================="
 
-          if [ -f "mega_iptv_output/statistics.txt" ]; then
+          if [ -f mega_iptv_output/statistics.txt ]; then
             cat mega_iptv_output/statistics.txt
           else
             echo "statistics.txt not found"
           fi
 
       # ============================================================
-      # SHOW STABLE STATE
+      # STABLE STATE
       # ============================================================
-      - name: Show Stable state
+      - name: Show stable state
         if: always()
         run: |
-          echo "============================================================"
-          echo "STABLE STATE"
-          echo "============================================================"
+          echo "=============================================="
+          echo "stable_state.json"
+          echo "=============================================="
 
-          if [ -f "mega_iptv_output/stable_state.json" ]; then
+          if [ -f mega_iptv_output/stable_state.json ]; then
             cat mega_iptv_output/stable_state.json
           else
             echo "stable_state.json not found"
           fi
 
       # ============================================================
-      # SHOW STABLE PLAYLIST
-      # ============================================================
-      - name: Show Stable playlist
-        if: always()
-        run: |
-          echo "============================================================"
-          echo "STABLE PLAYLIST"
-          echo "============================================================"
-
-          if [ -f "mega_iptv_output/Stable_Ru_IPTV.m3u" ]; then
-
-            echo "File:"
-            ls -lh mega_iptv_output/Stable_Ru_IPTV.m3u
-
-            echo
-            echo "Entries:"
-
-            grep -c '^#EXTINF:' \
-              mega_iptv_output/Stable_Ru_IPTV.m3u || true
-
-          else
-            echo "Stable_Ru_IPTV.m3u not found"
-          fi
-
-      # ============================================================
-      # UPLOAD ARTIFACT
+      # ARTIFACT
       # ============================================================
       - name: Upload Teddi results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: teddi-iptv-results-${{ github.run_number }}
-          path: |
-            mega_iptv_output/
+          path: mega_iptv_output/
           if-no-files-found: warn
           retention-days: 14
 
       # ============================================================
-      # COMMIT GENERATED RESULTS
+      # COMMIT RESULTS
       # ============================================================
       - name: Commit generated results
         if: success()
         run: |
-          set -eux
+          set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
